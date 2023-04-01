@@ -1,0 +1,7 @@
+torch
+transformers
+sentencepiece
+sacremoses
+evaluate
+sentence_transformers
+tqdm
