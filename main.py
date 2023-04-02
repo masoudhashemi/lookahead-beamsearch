@@ -123,7 +123,7 @@ def main(
 
 @app.command()
 def run(
-    prompt: str = "One upon a tim",
+    prompt: str = "Once upon a time",
     generator: str = "typical_set",
     temperature: float = 1,
     top_p: float = 1,
