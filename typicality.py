@@ -1,3 +1,8 @@
+import numpy as np
+import torch
+from tqdm import tqdm
+
+
 def typical_set_sampling(logits, temperature, epsilon):
     probs = torch.softmax(logits / temperature, dim=-1).numpy()
     log_probs = np.log(probs)
@@ -17,7 +22,7 @@ def typical_set_sampling(logits, temperature, epsilon):
 
 
 def generate_with_typical_set_sampling(
-    model, tokenizer, input_text, temperature=1.0, max_length=50, num_beams=5, epsilon=0.1
+    model, tokenizer, input_text, temperature=1.0, max_length=50, num_beams=1, epsilon=0.1
 ):
     input_ids = tokenizer.encode(input_text, return_tensors="pt")
 

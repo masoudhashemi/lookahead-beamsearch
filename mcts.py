@@ -2,6 +2,7 @@ import math
 import random
 
 import torch
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 

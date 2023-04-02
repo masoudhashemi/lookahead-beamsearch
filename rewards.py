@@ -37,12 +37,6 @@ def preplexity_eval(model, tokenizer, sentence, device="cpu"):
     return ppl
 
 
-# Function to calculate perplexity
-def calculate_perplexity(sentence):
-    results = preplexity_eval(model, tokenizer, sentence)
-    return results
-
-
 def get_toxicity_score(text, model, tokenizer):
     inputs = tokenizer.encode(text, return_tensors="pt", truncation=True, padding=True)
     outputs = model(inputs)
@@ -50,16 +44,3 @@ def get_toxicity_score(text, model, tokenizer):
     toxic_class_index = 1  # Class index for the toxic label
     toxic_score = float(probabilities[:, toxic_class_index])
     return toxic_score
-
-
-model_name = "distilbert-base-uncased-finetuned-sst-2-english"
-tokenizer_toxicity = AutoTokenizer.from_pretrained(model_name)
-model_toxicity = AutoModelForSequenceClassification.from_pretrained(model_name)
-
-
-toxicity_metric_not_toxic = lambda text: get_toxicity_score(
-    text, model_toxicity, tokenizer_toxicity
-)
-toxicity_metric_toxic = lambda text: 1 - get_toxicity_score(
-    text, model_toxicity, tokenizer_toxicity
-)

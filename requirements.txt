@@ -5,3 +5,4 @@ sacremoses
 evaluate
 sentence_transformers
 tqdm
+typer
