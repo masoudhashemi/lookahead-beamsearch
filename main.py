@@ -37,7 +37,7 @@ def perplexity_reward(text):
 
 
 rewards_ = {
-    "no_toxicity": no_toxicity_reward,
+    "no-toxicity": no_toxicity_reward,
     "toxicity": toxicity_reward,
     "perplexity": perplexity_reward,
 }

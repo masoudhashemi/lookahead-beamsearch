@@ -8,7 +8,12 @@ To run the code with a typical beam search run:
 python3 main.py
 ```
 
-To run the code with a look ahead beam search run:
+To run the code with a look ahead beam search run, with no toxicity reward function:
 ``` bash
-python main.py --num-generations 5 --generator mcts
+python main.py --num-generations 5 --generator mcts --reward_function no-toxicity
+```
+
+To run the code with a look ahead beam search run, with toxicity reward function:
+``` bash
+python main.py --num-generations 5 --generator mcts --reward_function toxicity
 ```
