@@ -1,12 +1,7 @@
 from typing import Callable
 
 import typer
-from transformers import (
-    AutoModelForSequenceClassification,
-    AutoTokenizer,
-    GPT2LMHeadModel,
-    GPT2Tokenizer,
-)
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, GPT2LMHeadModel, GPT2Tokenizer
 
 from mcts import mcts_sentence_generator
 from rewards import get_toxicity_score, preplexity_eval
@@ -23,12 +18,9 @@ tokenizer_toxicity = AutoTokenizer.from_pretrained(model_name)
 model_toxicity = AutoModelForSequenceClassification.from_pretrained(model_name)
 
 
-no_toxicity_reward = lambda text: get_toxicity_score(
-    text, model_toxicity, tokenizer_toxicity
-)
-toxicity_reward = lambda text: 1 - get_toxicity_score(
-    text, model_toxicity, tokenizer_toxicity
-)
+no_toxicity_reward = lambda text: get_toxicity_score(text, model_toxicity, tokenizer_toxicity)
+toxicity_reward = lambda text: 1 - get_toxicity_score(text, model_toxicity, tokenizer_toxicity)
+
 
 # Function to calculate perplexity
 def perplexity_reward(text):
@@ -138,11 +130,7 @@ def run(
     Generate text using a specified generator and set of parameters.
     """
     # Select the appropriate text generator based on the specified argument
-    generator_func = (
-        _generate_with_typical_set_sampling
-        if generator == "typical_set"
-        else _mcts_sentence_generator
-    )
+    generator_func = _generate_with_typical_set_sampling if generator == "typical_set" else _mcts_sentence_generator
 
     # Call the main function with the specified arguments
     main(

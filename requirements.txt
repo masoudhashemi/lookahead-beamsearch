@@ -6,3 +6,4 @@ evaluate
 sentence_transformers
 tqdm
 typer
+colorama>=0.4.6

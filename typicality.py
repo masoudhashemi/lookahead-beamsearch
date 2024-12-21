@@ -38,10 +38,7 @@ def generate_with_typical_set_sampling(
             next_token_logits = [model(beam).logits[:, -1, :] for beam in beams]
 
             # Apply typical set sampling to select the next token for all beams
-            next_tokens = [
-                typical_set_sampling(logits, temperature, epsilon)
-                for logits in next_token_logits
-            ]
+            next_tokens = [typical_set_sampling(logits, temperature, epsilon) for logits in next_token_logits]
 
             # Update the beams with the new tokens
             beams = [
@@ -49,7 +46,5 @@ def generate_with_typical_set_sampling(
                 for beam, next_token in zip(beams, next_tokens)
             ]
 
-    decoded_outputs = [
-        tokenizer.decode(output[0], skip_special_tokens=True) for output in beams
-    ]
+    decoded_outputs = [tokenizer.decode(output[0], skip_special_tokens=True) for output in beams]
     return decoded_outputs
