@@ -1,4 +1,5 @@
 import math
+import logging
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -7,18 +8,13 @@ from colorama import Fore, Style, init
 # Initialize colorama so that ANSI color codes work across platforms
 init(autoreset=True)
 
+# Create a dedicated logger for MCTS
+logger = logging.getLogger("MCTSLogger")
+logger.setLevel(logging.INFO)
 
 def get_color_for_value(value, min_val, max_val):
     """
     Return a color based on the node value, normalized between min_val and max_val.
-
-    Args:
-        value (float): Value of the node/token.
-        min_val (float): Minimum value among all tokens.
-        max_val (float): Maximum value among all tokens.
-
-    Returns:
-        str: A color from colorama.Fore.
     """
     if max_val == min_val:
         normalized = 0.5
@@ -36,16 +32,8 @@ def get_color_for_value(value, min_val, max_val):
 def top_k_top_p_filtering(logits, top_k=0, top_p=1.0):
     """
     Filter a distribution of logits using top-k and top-p (nucleus) filtering.
-
-    Args:
-        logits (torch.Tensor): Logits distribution (size [vocab_size]).
-        top_k (int): Keep only top k tokens with highest logits.
-        top_p (float): Keep the smallest set of tokens whose cumulative probability
-                       exceeds top_p.
-
-    Returns:
-        torch.Tensor: Filtered logits with some values set to -inf.
     """
+    # -- Top-k filtering
     if top_k > 0:
         values, _ = torch.topk(logits, top_k)
         min_value = values[-1]
@@ -55,6 +43,7 @@ def top_k_top_p_filtering(logits, top_k=0, top_p=1.0):
             logits,
         )
 
+    # -- Top-p (nucleus) filtering
     if top_p < 1.0:
         sorted_logits, sorted_indices = torch.sort(logits, descending=True)
         cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
@@ -69,14 +58,7 @@ def top_k_top_p_filtering(logits, top_k=0, top_p=1.0):
 
 class MCTSNode:
     """
-    A node for the Monte Carlo Tree Search (MCTS) in text generation.
-
-    Each node represents a partial sequence of tokens, storing:
-      - The action (token) that led to it
-      - References to its parent and any children
-      - Total reward accumulated and visit counts
-      - Model/tokenizer references
-      - Other hyperparameters relevant to text generation
+    A node for Monte Carlo Tree Search in text generation.
     """
 
     def __init__(
@@ -91,21 +73,14 @@ class MCTSNode:
         top_k=50,
         top_p=0.9,
         num_rollouts=5,
+        look_ahead=3,
+        verbose=False,
     ):
         """
         Initialize an MCTSNode.
-
-        Args:
-            parent (MCTSNode): The parent node of this node. None if this is the root.
-            action (int): The token ID (action) that led to this node from its parent.
-            tokenizer: A tokenizer for converting between IDs and text.
-            model: A language model (e.g., GPT-2).
-            reward_function (callable): A function that takes decoded text and returns a reward float.
-            max_length (int): Maximum sequence length for the generated text.
-            temperature (float): Sampling temperature for next-token distribution.
-            top_k (int): Top-k sampling parameter.
-            top_p (float): Top-p (nucleus) sampling parameter.
-            num_rollouts (int): Number of rollouts to perform from each node during expansion.
+        
+        If `verbose=True`, the logger level for this node is set to INFO; 
+        otherwise, it's set to WARNING.
         """
         self.parent = parent
         self.action = action
@@ -117,135 +92,129 @@ class MCTSNode:
         self.top_k = top_k
         self.top_p = top_p
         self.num_rollouts = num_rollouts
+        self.look_ahead = look_ahead
 
-        # Statistics for MCTS
+        # MCTS statistics
         self.total_reward = 0.0
         self.visits = 0
         self.children = []
         self.value = 0.0
 
-        # Build up the generated text: inherit from parent or start fresh
+        # Build up the generated text (inherit from parent or start fresh)
         if parent is not None and action is not None:
             self.generated_text = parent.generated_text + [action]
         else:
             self.generated_text = [] if action is None else [action]
 
-        # Check if this node represents a sequence at or beyond max_length
+        # Terminal if we reached max_length
         self._is_terminal = len(self.generated_text) >= self.max_length
+
+        # We'll store a local logger level if needed
+        if verbose:
+            self._logger_level = logging.INFO
+        else:
+            self._logger_level = logging.WARNING
 
     def select_child(self, c_param=1.414):
         """
-        Select a child node based on the UCT (Upper Confidence Bound for Trees) formula:
-            UCT(child) = Q(child) + c_param * sqrt((log(N)) / n)
-
+        Select a child using the UCB (Upper Confidence Bound) formula:
+          UCT(child) = Q(child) + c_param * sqrt((log(N)) / (n + 1e-8))
         where:
-            Q(child) = child.total_reward / child.visits  (exploitation)
-            N = sum of visits to all children of the parent
-            n = child.visits
-
-        Args:
-            c_param (float): Exploration constant.
-
-        Returns:
-            MCTSNode: The child node with the highest UCT value.
+          Q(child) = child.total_reward / child.visits
+          N = sum of visits to all children of the parent
+          n = child.visits
         """
-        # Total visits among siblings
         total_visits = sum(child.visits for child in self.children)
 
         def uct_value(child):
             if child.visits == 0:
-                return math.inf
+                return float('inf')
             exploitation = child.total_reward / child.visits
             exploration = c_param * math.sqrt(
                 math.log(total_visits + 1) / (child.visits + 1e-8)
             )
             return exploitation + exploration
 
-        return max(self.children, key=uct_value)
+        selected_child = max(self.children, key=uct_value)
 
-    def rollout(self, temperature, top_k, top_p, look_ahead=3):
+        logger.log(
+            self._logger_level,
+            f"[SelectChild] Chose child token={selected_child.action}, "
+            f"UCT value={uct_value(selected_child):.3f}, visits={selected_child.visits}, "
+            f"current node text='{self.tokenizer.decode(self.generated_text, skip_special_tokens=True)}'"
+        )
+
+        return selected_child
+
+    def rollout(self):
         """
-        Perform a rollout from this node. We:
+        Perform a short rollout from this node by:
+          1) Sampling 'num_rollouts' possible tokens from the distribution.
+          2) For each sampled token, greedily expand 'look_ahead' steps.
+          3) Compute reward for the final text.
 
-          1) Sample 'num_rollouts' possible next tokens from the filtered logits.
-          2) For each sampled token, perform a greedy rollout for 'look_ahead' steps.
-             We sum up the reward at each step and then average it.
-
-        Args:
-            temperature (float): Temperature for sampling.
-            top_k (int): Top-k cutoff.
-            top_p (float): Top-p cutoff (nucleus sampling).
-            look_ahead (int): Number of greedy expansion steps for each sampled token.
-
-        Returns:
-            dict: Mapping from token_id -> { "reward": float, "visits": int }
+        Returns a dict: 
+            token_id -> { "reward": float, "visits": int }
         """
         model = self.model
         tokenizer = self.tokenizer
         reward_function = self.reward_function
 
-        # Ensure the input is placed on the same device as the model
         device = next(model.parameters()).device
         input_ids = torch.tensor([self.generated_text], device=device)
 
         with torch.no_grad():
-            # Get logits for the last token
+            # Get next-token logits
             outputs = model(input_ids)
-            logits = outputs.logits[:, -1, :] / temperature
-
-            # Filter logits using top-k and top-p
-            filtered_logits = top_k_top_p_filtering(logits[0], top_k=top_k, top_p=top_p)
+            logits = outputs.logits[:, -1, :] / self.temperature
+            filtered_logits = top_k_top_p_filtering(logits[0], top_k=self.top_k, top_p=self.top_p)
             probs = F.softmax(filtered_logits, dim=-1)
 
-            # Sample num_rollouts tokens from the distribution
+            # Sample multiple tokens
             sampled_tokens = torch.multinomial(probs, num_samples=self.num_rollouts)
 
-            # Store the stats for each sampled token
-            token_stats = {
-                token.item(): {"reward": 0.0, "visits": 0} for token in sampled_tokens
-            }
+            token_stats = {token.item(): {"reward": 0.0, "visits": 0} for token in sampled_tokens}
 
-            # Evaluate each sampled token via greedy expansion
             for token in sampled_tokens:
                 rollout_reward = 0.0
-                # Start with the prompt plus the newly sampled token
                 current_text = torch.cat([input_ids[0], token.unsqueeze(0)], dim=0)
 
-                # Greedy expansion for 'look_ahead' steps
-                for _ in range(look_ahead):
+                # Greedy expand for look_ahead steps
+                for _ in range(self.look_ahead):
                     if current_text.shape[0] >= self.max_length:
                         break
-
                     outputs = model(current_text.unsqueeze(0))
                     next_token_id = outputs.logits[0, -1, :].argmax(dim=-1)
                     current_text = torch.cat([current_text, next_token_id.unsqueeze(0)], dim=0)
 
-                    # Compute reward for the newly formed text
-                    decoded_text = tokenizer.decode(current_text, skip_special_tokens=True)
-                    step_reward = reward_function(decoded_text)
-                    rollout_reward += step_reward
+                decoded_text = tokenizer.decode(current_text, skip_special_tokens=True)
+                rollout_reward = reward_function(decoded_text)
 
-                # Average reward across the look_ahead steps
-                avg_reward = rollout_reward / max(1, look_ahead)
                 t_id = token.item()
-                token_stats[t_id]["reward"] += avg_reward
+                token_stats[t_id]["reward"] += rollout_reward
                 token_stats[t_id]["visits"] += 1
 
-            return token_stats
+                # Log each rollout if needed
+                logger.log(
+                    self._logger_level,
+                    f"[Rollout] Sampled token='{tokenizer.decode([t_id], skip_special_tokens=True)}' "
+                    f"(ID={t_id}), Reward={rollout_reward:.3f}, "
+                    f"Partial seq='{decoded_text[:60]}{'...' if len(decoded_text)>60 else ''}'"
+                )
+
+        return token_stats
 
     def expand(self):
         """
-        Expand the current node by generating new children based on rollouts.
-
-        For each sampled token during rollout, create a child node and immediately
-        backpropagate the obtained reward.
+        Expand this node by sampling multiple tokens (rollout) and creating child nodes.
+        Then backpropagate the average reward for each newly created child.
         """
-        # Perform the rollout
-        token_stats = self.rollout(
-            self.temperature, self.top_k, self.top_p, look_ahead=3
-        )
+        # If already terminal, no expansion
+        if self._is_terminal:
+            return
 
-        # Create child nodes for each token and backpropagate the average reward
+        token_stats = self.rollout()  # {token_id: {"reward": x, "visits": y}, ...}
+
         for token_id, stats in token_stats.items():
             child_node = MCTSNode(
                 parent=self,
@@ -258,19 +227,24 @@ class MCTSNode:
                 top_k=self.top_k,
                 top_p=self.top_p,
                 num_rollouts=self.num_rollouts,
+                look_ahead=self.look_ahead,
+                verbose=(self._logger_level == logging.INFO),
             )
             self.children.append(child_node)
 
-            # Update this child with the average reward from rollout
-            avg_reward_for_token = stats["reward"]
-            child_node._backpropagate(avg_reward_for_token)
+            avg_reward = stats["reward"] / max(stats["visits"], 1)
+            child_node._backpropagate(avg_reward)
+
+            # Log child creation if needed
+            logger.log(
+                self._logger_level,
+                f"[Expand] Created child token='{self.tokenizer.decode([token_id], skip_special_tokens=True)}' "
+                f"(ID={token_id}), Avg reward={avg_reward:.3f}, child value={child_node.value:.3f}"
+            )
 
     def _backpropagate(self, reward):
         """
-        Backpropagate the reward through the tree up to the root node.
-
-        Args:
-            reward (float): Reward to propagate.
+        Backpropagate a reward up the chain to the root.
         """
         node = self
         while node is not None:
@@ -291,29 +265,20 @@ def mcts_sentence_generator(
     temperature=1.0,
     top_k=50,
     top_p=0.9,
+    look_ahead=3,
     device=None,
+    verbose=False,
 ):
     """
-    Generate text using Monte Carlo Tree Search (MCTS) with a language model.
-    Additionally, color-code each newly generated token based on its MCTS node value.
-
-    Args:
-        model: A language model (e.g., GPT-2).
-        tokenizer: The tokenizer compatible with the model.
-        prompt (str): The initial text prompt.
-        reward_function (callable): A function that accepts a decoded text and returns a float reward.
-        num_tokens (int): Maximum number of new tokens to generate.
-        iterations (int): MCTS iterations per token step.
-        num_rollouts (int): Number of rollouts each node does during expansion.
-        temperature (float): Sampling temperature for next-token distribution.
-        top_k (int): Top-k parameter for next-token filtering.
-        top_p (float): Top-p parameter for nucleus filtering.
-        device (str or torch.device): The torch device to run on (e.g., "cpu" or "cuda").
-    
-    Returns:
-        str: A color-coded string representing the final generated text, where each
-             token is colored according to its value.
+    Generate text using MCTS with rollouts and color the tokens by their final MCTS value.
+    Uses Python's logging library for logging messages.
     """
+    # Configure global logging level based on 'verbose'
+    if verbose:
+        logger.setLevel(logging.INFO)
+    else:
+        logger.setLevel(logging.WARNING)
+
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -324,7 +289,7 @@ def mcts_sentence_generator(
     input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
     initial_text_ids = input_ids[0].tolist()
 
-    # Create the MCTS root node
+    # Root node for MCTS
     root = MCTSNode(
         tokenizer=tokenizer,
         model=model,
@@ -334,53 +299,77 @@ def mcts_sentence_generator(
         top_k=top_k,
         top_p=top_p,
         num_rollouts=num_rollouts,
+        look_ahead=look_ahead,
+        verbose=verbose
     )
-    # Initialize the root with the prompt's token IDs
+    # Initialize the root with the prompt tokens
     root.generated_text = initial_text_ids
 
-    # Generate tokens using MCTS
-    for _ in tqdm(range(num_tokens), desc="Generating tokens"):
-        # For each token, we run several MCTS iterations
-        for _ in range(iterations):
+    for step_idx in tqdm(range(num_tokens), desc="Generating tokens"):
+        logger.log(
+            root._logger_level,
+            f"[MCTS] Step {step_idx+1}/{num_tokens} - current text: "
+            f"'{tokenizer.decode(root.generated_text, skip_special_tokens=True)}'"
+        )
+
+        # Run MCTS iterations from the current root
+        for i in range(iterations):
             node = root
 
-            # 1. Selection: move down the tree until we reach a leaf or terminal node
+            # 1. Selection: traverse down to a leaf
             while node.children and not node._is_terminal:
                 node = node.select_child()
-
-            # 2. Expansion + Simulation (Rollout)
+            
+            # 2. Expansion + Simulation
             if not node._is_terminal:
                 node.expand()
 
-        # After MCTS iterations, choose the best child from the root to proceed
+            logger.log(
+                root._logger_level,
+                f"[MCTS Iteration] Expanded leaf node, text='{tokenizer.decode(node.generated_text, skip_special_tokens=True)}', "
+                f"children={len(node.children)}, node value={node.value:.3f}"
+            )
+
+        # After 'iterations' expansions, pick the child with the highest value (greedy)
         if root.children:
-            root = root.select_child()
+            best_child = max(root.children, key=lambda c: c.value)
+            logger.log(
+                root._logger_level,
+                f"[MCTS] Best child chosen token ID={best_child.action}, value={best_child.value:.3f}, "
+                f"New partial text='{tokenizer.decode(best_child.generated_text, skip_special_tokens=True)}'"
+            )
+            root = best_child
         else:
-            # No children means we can't proceed further
+            logger.log(root._logger_level, "[MCTS] No children from the root; stopping generation.")
             break
 
-    # Reconstruct the token/value path from the final node up to the root
+        if root._is_terminal:
+            logger.log(root._logger_level, "[MCTS] Reached max_length, stopping generation.")
+            break
+
+    # Collect the generated tokens from the final node
     token_value_pairs = []
     node = root
     while node.parent is not None:
         token_value_pairs.append((node.action, node.value))
         node = node.parent
-    token_value_pairs.reverse()  # Because we collected them from leaf -> root
+    token_value_pairs.reverse()
 
-    # Compute min & max values among the generated tokens
-    if token_value_pairs:
-        all_values = [pair[1] for pair in token_value_pairs]
-        min_val, max_val = min(all_values), max(all_values)
-    else:
-        # If no tokens were generated, just return the prompt
+    # If no tokens were actually generated, just return the prompt
+    if not token_value_pairs:
         return prompt
 
-    # Build the color-coded text
-    colored_text = prompt  # start with the prompt in plain text
+    # Determine min/max value for color scaling
+    all_values = [pair[1] for pair in token_value_pairs]
+    min_val, max_val = min(all_values), max(all_values)
+
+    # Build color-coded final text
+    colored_text = prompt
     for (token_id, val) in token_value_pairs:
         color = get_color_for_value(val, min_val, max_val)
         token_str = tokenizer.decode([token_id], skip_special_tokens=True)
-        # Append the color-coded token to the final string (add space for clarity)
         colored_text += " " + color + token_str + Style.RESET_ALL
+
+    logger.log(root._logger_level, f"[MCTS] Final generated text: '{colored_text}'")
 
     return colored_text
