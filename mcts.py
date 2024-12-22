@@ -265,7 +265,7 @@ def mcts_sentence_generator(
     temperature=1.0,
     top_k=50,
     top_p=0.9,
-    look_ahead=3,
+    look_ahead=5,
     device=None,
     verbose=False,
 ):

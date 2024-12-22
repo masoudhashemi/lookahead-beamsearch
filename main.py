@@ -24,7 +24,7 @@ toxicity_reward = lambda text: 1 - get_toxicity_score(text, model_toxicity, toke
 
 # Function to calculate perplexity
 def perplexity_reward(text):
-    results = preplexity_eval(model, tokenizer, text)
+    results = -preplexity_eval(model, tokenizer, text)
     return results
 
 
