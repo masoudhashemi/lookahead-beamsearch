@@ -61,7 +61,7 @@ def _mcts_sentence_generator(
     top_p: float,
     top_k: int,
     max_length: int,
-    reward_function: str,
+    reward_function: Callable,
     mcts_iterations: int,
     typc_epsilon: float,
 ) -> str:
@@ -88,7 +88,7 @@ def main(
     num_generations: int = 1,
     max_length: int = 20,
     reward_function: str = "toxicity",
-    mcts_iterations: int = 5,
+    mcts_iterations: int = 2,
     typc_epsilon: float = 0.1,
 ):
 
