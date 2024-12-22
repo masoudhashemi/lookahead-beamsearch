@@ -1,9 +1,10 @@
-import math
 import logging
+import math
+
 import torch
 import torch.nn.functional as F
-from tqdm import tqdm
 from colorama import Fore, Style, init
+from tqdm import tqdm
 
 # Initialize colorama so that ANSI color codes work across platforms
 init(autoreset=True)
@@ -11,6 +12,7 @@ init(autoreset=True)
 # Create a dedicated logger for MCTS
 logger = logging.getLogger("MCTSLogger")
 logger.setLevel(logging.INFO)
+
 
 def get_color_for_value(value, min_val, max_val):
     """
@@ -78,8 +80,8 @@ class MCTSNode:
     ):
         """
         Initialize an MCTSNode.
-        
-        If `verbose=True`, the logger level for this node is set to INFO; 
+
+        If `verbose=True`, the logger level for this node is set to INFO;
         otherwise, it's set to WARNING.
         """
         self.parent = parent
@@ -128,11 +130,9 @@ class MCTSNode:
 
         def uct_value(child):
             if child.visits == 0:
-                return float('inf')
+                return float("inf")
             exploitation = child.total_reward / child.visits
-            exploration = c_param * math.sqrt(
-                math.log(total_visits + 1) / (child.visits + 1e-8)
-            )
+            exploration = c_param * math.sqrt(math.log(total_visits + 1) / (child.visits + 1e-8))
             return exploitation + exploration
 
         selected_child = max(self.children, key=uct_value)
@@ -141,7 +141,7 @@ class MCTSNode:
             self._logger_level,
             f"[SelectChild] Chose child token={selected_child.action}, "
             f"UCT value={uct_value(selected_child):.3f}, visits={selected_child.visits}, "
-            f"current node text='{self.tokenizer.decode(self.generated_text, skip_special_tokens=True)}'"
+            f"current node text='{self.tokenizer.decode(self.generated_text, skip_special_tokens=True)}'",
         )
 
         return selected_child
@@ -153,7 +153,7 @@ class MCTSNode:
           2) For each sampled token, greedily expand 'look_ahead' steps.
           3) Compute reward for the final text.
 
-        Returns a dict: 
+        Returns a dict:
             token_id -> { "reward": float, "visits": int }
         """
         model = self.model
@@ -199,7 +199,7 @@ class MCTSNode:
                     self._logger_level,
                     f"[Rollout] Sampled token='{tokenizer.decode([t_id], skip_special_tokens=True)}' "
                     f"(ID={t_id}), Reward={rollout_reward:.3f}, "
-                    f"Partial seq='{decoded_text[:60]}{'...' if len(decoded_text)>60 else ''}'"
+                    f"Partial seq='{decoded_text[:60]}{'...' if len(decoded_text)>60 else ''}'",
                 )
 
         return token_stats
@@ -239,7 +239,7 @@ class MCTSNode:
             logger.log(
                 self._logger_level,
                 f"[Expand] Created child token='{self.tokenizer.decode([token_id], skip_special_tokens=True)}' "
-                f"(ID={token_id}), Avg reward={avg_reward:.3f}, child value={child_node.value:.3f}"
+                f"(ID={token_id}), Avg reward={avg_reward:.3f}, child value={child_node.value:.3f}",
             )
 
     def _backpropagate(self, reward):
@@ -300,7 +300,7 @@ def mcts_sentence_generator(
         top_p=top_p,
         num_rollouts=num_rollouts,
         look_ahead=look_ahead,
-        verbose=verbose
+        verbose=verbose,
     )
     # Initialize the root with the prompt tokens
     root.generated_text = initial_text_ids
@@ -309,7 +309,7 @@ def mcts_sentence_generator(
         logger.log(
             root._logger_level,
             f"[MCTS] Step {step_idx+1}/{num_tokens} - current text: "
-            f"'{tokenizer.decode(root.generated_text, skip_special_tokens=True)}'"
+            f"'{tokenizer.decode(root.generated_text, skip_special_tokens=True)}'",
         )
 
         # Run MCTS iterations from the current root
@@ -319,7 +319,7 @@ def mcts_sentence_generator(
             # 1. Selection: traverse down to a leaf
             while node.children and not node._is_terminal:
                 node = node.select_child()
-            
+
             # 2. Expansion + Simulation
             if not node._is_terminal:
                 node.expand()
@@ -327,7 +327,7 @@ def mcts_sentence_generator(
             logger.log(
                 root._logger_level,
                 f"[MCTS Iteration] Expanded leaf node, text='{tokenizer.decode(node.generated_text, skip_special_tokens=True)}', "
-                f"children={len(node.children)}, node value={node.value:.3f}"
+                f"children={len(node.children)}, node value={node.value:.3f}",
             )
 
         # After 'iterations' expansions, pick the child with the highest value (greedy)
@@ -336,7 +336,7 @@ def mcts_sentence_generator(
             logger.log(
                 root._logger_level,
                 f"[MCTS] Best child chosen token ID={best_child.action}, value={best_child.value:.3f}, "
-                f"New partial text='{tokenizer.decode(best_child.generated_text, skip_special_tokens=True)}'"
+                f"New partial text='{tokenizer.decode(best_child.generated_text, skip_special_tokens=True)}'",
             )
             root = best_child
         else:
@@ -365,7 +365,7 @@ def mcts_sentence_generator(
 
     # Build color-coded final text
     colored_text = prompt
-    for (token_id, val) in token_value_pairs:
+    for token_id, val in token_value_pairs:
         color = get_color_for_value(val, min_val, max_val)
         token_str = tokenizer.decode([token_id], skip_special_tokens=True)
         colored_text += " " + color + token_str + Style.RESET_ALL
